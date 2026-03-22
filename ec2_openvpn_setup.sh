@@ -4,8 +4,8 @@ exec > /var/log/userdata.log 2>&1
 
 #check for internet connection
 echo "Waiting for internet connection..."
-$ATTEMPTS=0
-$MAX_ATTEMPTS=10
+ATTEMPTS=0
+MAX_ATTEMPTS=10
 
 while ! curl -s --max-time 5 http://connectivitycheck.gstatic.com/generate_204 > /dev/null 2>&1; do
     echo "No internet connection, retrying in 30 seconds..."
@@ -46,6 +46,23 @@ fi
 iptables -A FORWARD -i tun0 -o "$IFACE" -j ACCEPT
 iptables -A FORWARD -i "$IFACE" -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 
+#check for metadata
+ATTP=0
+MAX_ATTP=12
+while ! curl -s --max-time 5 http://169.254.169.254/latest/meta-data/public-ipv4 > /dev/null 2>&1; do
+    ATTEMPTS=$((ATTP + 1))
+    if [ "$ATTEMPTS" -ge "$MAX_ATTP" ]; then
+        echo "Metadata service unavailable, falling back to checkip.amazonaws.com..."
+        break
+    fi
+    sleep 5
+done
+
+PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+if [ -z "$PUBLIC_IP"]; then
+    PUBLIC_IP=$(curl -s https://checkip.amazonaws.com)
+fi
+echo "Public IP: $PUBLIC_IP"
 
 #MAKE CERT PART
 
@@ -113,7 +130,7 @@ cat > /etc/openvpn/client.ovpn << EOF
 client
 dev tun
 proto udp
-remote $(curl -s http://169.254.169.254/latest/meta-data/public-ipv4) 1194
+remote $PUBLIC_IP 1194
 tls-version-min 1.2
 tls-cipher TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256:TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384:TLS-DHE-RSA-WITH-AES-256-CBC-SHA256
 data-ciphers AES-256-GCM:AES-256-CBC
